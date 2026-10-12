@@ -8,6 +8,7 @@ const mask = (str, startLen = 4, endLen = 4) => {
 // ========== GLaDOS 签到核心逻辑 ==========
 const glados = async () => {
   const notice = []
+  const pointsSummary = [] // 用于最终汇总各账号积分
   console.log('========== GLaDOS 签到任务开始 ==========')
   // 环境变量检测
   if (!process.env.GLADOS) {
@@ -65,56 +66,59 @@ const glados = async () => {
       }
       // 签到成功
       const leftDays = Number(status?.data?.leftDays)
-      // ========== 新增：积分自动兑换（满500积分自动消耗500积分兑换100天） ==========
+
+      // ========== 3. 查询当前积分（始终执行，保证运行日志能看到每个账号积分） ==========
+      let currentPoints = null
+      try {
+        console.log(`[账号 ${accountNo}] 正在获取积分...`)
+        const pointsRes = await fetch(`https://${domain}/api/user/points`, {
+          method: 'GET',
+          headers: { ...common },
+        })
+        if (!pointsRes.ok) {
+          throw new Error(`积分接口HTTP错误: ${pointsRes.status} ${pointsRes.statusText}`)
+        }
+        const pointsData = await pointsRes.json()
+        console.log(`[账号 ${accountNo}] 积分接口响应码: ${pointsData?.code ?? '无'}`)
+        if (pointsData?.code !== 0) {
+          throw new Error(`获取积分失败: ${pointsData?.message || '未知错误'} (code=${pointsData?.code})`)
+        }
+        currentPoints = Number(pointsData?.data?.points) || 0
+        console.log(`[账号 ${accountNo}] 💰 当前积分: ${currentPoints} 点`)
+        pointsSummary.push(`账号${accountNo}: ${currentPoints} 点`)
+      } catch (pointsErr) {
+        console.warn(`[账号 ${accountNo}] ⚠️ 积分查询失败: ${pointsErr.message}`)
+        pointsSummary.push(`账号${accountNo}: 查询失败`)
+      }
+
+      // ========== 4. 积分自动兑换（满500积分自动消耗500积分兑换100天） ==========
       // 开关：AUTO_EXCHANGE，默认开启；设为 false 可关闭
       // 阈值：EXCHANGE_THRESHOLD，默认 500
       const autoExchange = String(process.env.AUTO_EXCHANGE || 'true').toLowerCase() !== 'false'
       const exchangeThreshold = Number(process.env.EXCHANGE_THRESHOLD || 500)
-      if (autoExchange) {
+      if (autoExchange && currentPoints != null && currentPoints >= exchangeThreshold) {
         try {
-          // 2.1 获取当前积分（兑换前必须拿到最新积分）
-          console.log(`[账号 ${accountNo}] 正在获取积分...`)
-          const pointsRes = await fetch(`https://${domain}/api/user/points`, {
-            method: 'GET',
-            headers: { ...common },
+          console.log(`[账号 ${accountNo}] 积分 ${currentPoints} ≥ ${exchangeThreshold}，自动兑换 100 天...`)
+          const exRes = await fetch(`https://${domain}/api/user/exchange`, {
+            method: 'POST',
+            headers: { ...common, 'content-type': 'application/json' },
+            body: JSON.stringify({ planType: 'plan500' }),
           })
-          if (!pointsRes.ok) {
-            throw new Error(`积分接口HTTP错误: ${pointsRes.status} ${pointsRes.statusText}`)
+          if (!exRes.ok) {
+            throw new Error(`兑换接口HTTP错误: ${exRes.status} ${exRes.statusText}`)
           }
-          const pointsData = await pointsRes.json()
-          console.log(`[账号 ${accountNo}] 积分接口响应码: ${pointsData?.code ?? '无'}`)
-          if (pointsData?.code !== 0) {
-            throw new Error(`获取积分失败: ${pointsData?.message || '未知错误'} (code=${pointsData?.code})`)
+          const ex = await exRes.json()
+          console.log(`[账号 ${accountNo}] 兑换接口响应码: ${ex?.code ?? '无'}`)
+          if (ex?.code !== 0) {
+            throw new Error(`${ex?.message || '兑换失败'} (code=${ex?.code})`)
           }
-          const currentPoints = Number(pointsData?.data?.points) || 0
-          console.log(`[账号 ${accountNo}] 当前积分: ${currentPoints}`)
-
-          // 2.2 达到阈值则自动兑换 500 积分 → 100 天
-          if (currentPoints >= exchangeThreshold) {
-            console.log(`[账号 ${accountNo}] 积分 ${currentPoints} ≥ ${exchangeThreshold}，自动兑换 100 天...`)
-            const exRes = await fetch(`https://${domain}/api/user/exchange`, {
-              method: 'POST',
-              headers: { ...common, 'content-type': 'application/json' },
-              body: JSON.stringify({ planType: 'plan500' }),
-            })
-            if (!exRes.ok) {
-              throw new Error(`兑换接口HTTP错误: ${exRes.status} ${exRes.statusText}`)
-            }
-            const ex = await exRes.json()
-            console.log(`[账号 ${accountNo}] 兑换接口响应码: ${ex?.code ?? '无'}`)
-            if (ex?.code !== 0) {
-              throw new Error(`${ex?.message || '兑换失败'} (code=${ex?.code})`)
-            }
-            const remain = Number(ex?.data?.points) || 0
-            console.log(`[账号 ${accountNo}] ✅ 自动兑换成功，剩余积分: ${remain}`)
-            notice.push(
-              `【账号${accountNo}】自动兑换成功`,
-              `兑换结果: ${ex?.data?.message || '消耗500积分兑换100天'}`,
-              `剩余积分: ${remain}`
-            )
-          } else {
-            console.log(`[账号 ${accountNo}] 积分 ${currentPoints} 未达到 ${exchangeThreshold}，本次不兑换`)
-          }
+          const remain = Number(ex?.data?.points) || 0
+          console.log(`[账号 ${accountNo}] ✅ 自动兑换成功，消耗500积分，剩余积分: ${remain}`)
+          notice.push(
+            `【账号${accountNo}】自动兑换成功`,
+            `兑换结果: ${ex?.data?.message || '消耗500积分兑换100天'}`,
+            `剩余积分: ${remain}`
+          )
         } catch (exErr) {
           // 兑换异常不影响签到结果，单独记录
           console.error(`[账号 ${accountNo}] ⚠️ 自动兑换异常（不影响签到结果）`)
@@ -124,15 +128,20 @@ const glados = async () => {
             `错误: ${exErr.message}`
           )
         }
+      } else if (autoExchange) {
+        console.log(`[账号 ${accountNo}] 积分 ${currentPoints ?? '未知'} 未达到 ${exchangeThreshold}，本次不兑换`)
       }
       // ========== 新增部分结束 ==========
+
       console.log(`[账号 ${accountNo}] ✅ 签到成功`)
       console.log(`[账号 ${accountNo}] 返回消息: ${action.message}`)
       console.log(`[账号 ${accountNo}] 剩余天数: ${leftDays} 天`)
+      console.log(`[账号 ${accountNo}] 当前积分: ${currentPoints != null ? currentPoints + ' 点' : '查询失败'}`)
       notice.push(
         `【账号${accountNo}】签到成功`,
         `${action?.message}`,
-        `剩余天数: ${leftDays} 天`
+        `剩余天数: ${leftDays} 天`,
+        `当前积分: ${currentPoints != null ? currentPoints + ' 点' : '查询失败'}`
       )
     } catch (error) {
       console.error(`[账号 ${accountNo}] ❌ 签到失败`)
@@ -148,6 +157,13 @@ const glados = async () => {
   // 汇总统计
   const successCount = notice.filter(n => n.includes('签到成功')).length
   const failCount = notice.filter(n => n.includes('签到失败')).length
+  console.log('\n========== 各账号当前积分 ==========')
+  if (pointsSummary.length) {
+    pointsSummary.forEach(line => console.log(`📊 ${line}`))
+  } else {
+    console.log('📊 无账号积分数据')
+  }
+  console.log('===================================')
   console.log('\n========== 签到任务处理完成 ==========')
   console.log(`📊 统计结果：成功 ${successCount} 个 | 失败 ${failCount} 个`)
   return notice
