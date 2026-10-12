@@ -88,7 +88,7 @@ const glados = async () => {
         if (pointsData?.code !== 0) {
           throw new Error(`获取积分失败: ${pointsData?.message || '未知错误'} (code=${pointsData?.code})`)
         }
-        currentPoints = Number(pointsData?.data?.points) || 0
+        currentPoints = Number(pointsData?.points) || 0
         console.log(`[账号 ${accountNo}] 💰 当前积分: ${currentPoints} 点`)
         pointsSummary.push(`账号${accountNo}: ${currentPoints} 点`)
       } catch (pointsErr) {
@@ -117,11 +117,11 @@ const glados = async () => {
           if (ex?.code !== 0) {
             throw new Error(`${ex?.message || '兑换失败'} (code=${ex?.code})`)
           }
-          const remain = Number(ex?.data?.points) || 0
+          const remain = Number(ex?.points) || 0
           console.log(`[账号 ${accountNo}] ✅ 自动兑换成功，消耗500积分，剩余积分: ${remain}`)
           notice.push(
             `【账号${accountNo}】自动兑换成功`,
-            `兑换结果: ${ex?.data?.message || '消耗500积分兑换100天'}`,
+            `兑换结果: ${ex?.message || '消耗500积分兑换100天'}`,
             `剩余积分: ${remain}`
           )
         } catch (exErr) {
