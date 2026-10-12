@@ -47,8 +47,13 @@ const glados = async () => {
       }
       const action = await checkinRes.json()
       console.log(`[账号 ${accountNo}] 签到接口响应码: ${action?.code ?? '无'}`)
-      if (action?.code !== 0) {
+      // code=0 签到成功；code=1 表示今日已签到过（属正常情况，仍继续查询剩余天数与积分）
+      const alreadyCheckedIn = action?.code === 1
+      if (action?.code !== 0 && !alreadyCheckedIn) {
         throw new Error(`${action?.message || '签到失败'} (code=${action.code}${action?.reason ? ', reason=' + action.reason : ''})`)
+      }
+      if (alreadyCheckedIn) {
+        console.log(`[账号 ${accountNo}] 今日已签到过，继续查询剩余天数与积分...`)
       }
       // 2. 获取账号状态（签到后更新剩余天数）
       console.log(`[账号 ${accountNo}] 正在获取账号状态...`)
@@ -133,13 +138,13 @@ const glados = async () => {
       }
       // ========== 新增部分结束 ==========
 
-      console.log(`[账号 ${accountNo}] ✅ 签到成功`)
-      console.log(`[账号 ${accountNo}] 返回消息: ${action.message}`)
+      console.log(`[账号 ${accountNo}] ✅ ${alreadyCheckedIn ? '今日已签到过' : '签到成功'}`)
+      console.log(`[账号 ${accountNo}] 返回消息: ${action?.message || (alreadyCheckedIn ? '今日已签到过' : '')}`)
       console.log(`[账号 ${accountNo}] 剩余天数: ${leftDays} 天`)
       console.log(`[账号 ${accountNo}] 当前积分: ${currentPoints != null ? currentPoints + ' 点' : '查询失败'}`)
       notice.push(
         `【账号${accountNo}】签到成功`,
-        `${action?.message}`,
+        `${alreadyCheckedIn ? '今日已签到过（无新增积分）' : action?.message}`,
         `剩余天数: ${leftDays} 天`,
         `当前积分: ${currentPoints != null ? currentPoints + ' 点' : '查询失败'}`
       )
